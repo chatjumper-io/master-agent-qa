@@ -30,7 +30,11 @@ REPORT_PATH = os.path.join(QA_DIR, "qa_report.json")
 
 
 def adb_cmd(args, timeout=15):
-    """Run an ADB command and return stdout."""
+    """Run an ADB command and return stdout.
+    
+    Uses the EXACT same ADB binary as master-agent to avoid
+    daemon version mismatch restarts.
+    """
     cmd = [ADB_PATH] + args
     kwargs = {}
     if IS_WINDOWS:
@@ -40,7 +44,16 @@ def adb_cmd(args, timeout=15):
             cmd, capture_output=True, text=True, timeout=timeout,
             encoding="utf-8", errors="replace", **kwargs,
         )
-        return r.stdout.strip()
+        out = r.stdout.strip()
+        # If daemon restarted, retry once
+        if "daemon started successfully" in out or "daemon not running" in (r.stderr or ""):
+            time.sleep(2)
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+                encoding="utf-8", errors="replace", **kwargs,
+            )
+            out = r.stdout.strip()
+        return out
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -63,7 +76,8 @@ def test_device_basic(serial):
     t = {}
 
     # ADB echo
-    t["adb_ok"] = adb_cmd(["-s", serial, "shell", "echo", "OK"]).strip() == "OK"
+    echo_out = adb_cmd(["-s", serial, "shell", "echo", "OK"]).strip()
+    t["adb_ok"] = "OK" in echo_out and "ERROR" not in echo_out
 
     # Battery
     out = adb_cmd(["-s", serial, "shell", "dumpsys", "battery"])
